@@ -1,0 +1,91 @@
+---
+title: "Random Forest Custom"
+output:
+      html_document:
+        keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rpart) # using the tree implementation of rpart 
+
+data("iris") # Example dataset to demonstrate the use of a random forest
+
+# Define parameters:
+number_of_trees = 100
+m_of_M = 2 # Number of columns to consider
+n = dim(iris)[1]
+M = dim(iris)[2]
+trees = list()
+
+#Fit forest to data:
+#Steps:
+for(i in 1:number_of_trees){
+  # sample dataset for each tree with replacement (bootstrap sample)
+  rows = sample(1:n,size=n,replace=TRUE)  
+  
+  # sample columns for each tree but with n<M number of total columns
+  cols = sample(1:M,size=m_of_M)
+  
+  # grow tree to largest extend possible (do not prune) and find best split
+  baseLearner = rpart(formula = iris$Species ~., data = iris[rows,cols],method = "class")
+  
+  #predict
+  res = predict(baseLearner)
+  trees = c(trees,list(res))
+}
+
+n_classes = length(levels(iris$Species))
+```
+
+Classification prediction using Random Forest (Majority Vote)
+```{r}
+result = matrix(ncol=n_classes,nrow=n)
+
+#Classification
+for(i in 1:n){
+  allTreeResult = matrix(data=0,nrow=1,ncol=n_classes)
+  for (j in 1:number_of_trees){
+    curr = trees[[j]][grepl(paste(c("(^|\\b)",i,"(\\.|\\b)"),collapse=""),row.names(trees[[j]])),] 
+    curr = matrix(curr,ncol=n_classes)
+    votes = max.col(curr)
+    for(k in dim(curr)[1]){
+      allTreeResult[,votes[k]] = allTreeResult[,votes[k]] +1
+    }
+    
+  }
+  
+  result[i,]=allTreeResult[1,]
+  
+}
+result = as.data.frame(result)
+colnames(result) = levels(iris$Species)
+votedResults = colnames(result)[max.col(result,ties.method="random")]
+print(votedResults)
+
+```
+
+
+Regression prediction using Random Forest (Mean over all trees for every Value)
+```{r}
+
+result = matrix(nrow=n,ncol=n_classes)
+for(i in 1:n){
+  perTreeResult = matrix(data=0,nrow=number_of_trees,ncol=n_classes)
+  for (j in 1:number_of_trees){
+    curr = trees[[j]][grepl(paste(c("(^|\\b)",i,"(\\.|\\b)"),collapse=""),row.names(trees[[j]])),] 
+    curr = matrix(curr,ncol=n_classes)
+    aggregated = colMeans(curr)
+    perTreeResult[j,]=aggregated    
+  }
+  result[i,]=colMeans(perTreeResult,na.rm = T)
+}
+print(result)
+
+
+
+
+```

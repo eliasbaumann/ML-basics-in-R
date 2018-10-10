@@ -1,0 +1,208 @@
+---
+title: "gradient boosting custom :)"
+output:
+  html_document:
+      keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Simple dataset for regression example
+```{r}
+# Simple example for regression tree
+x = 1:50
+y1 = runif(10,max= 15,min=10)
+y2 = runif(10,max=25,min=20)
+y3 = runif(10,max=5,min=0)
+y4 = runif(10,max=35,min=30)
+y5 = runif(10,max=17,min=13)
+y=c(y1,y2,y3,y4,y5)
+y <- scale(y,scale = F)
+
+z1 = runif(10,max=14,min=9)
+z2 = runif(10,max=24,min=19)
+z3 = runif(10,max=6,min=1)
+z4 = runif(10,max=37,min=32)
+z5 = runif(10,max=15,min=11)
+z = c(z1,z2,z3,z4,z5)
+
+x = cbind(x,z)
+plot(x)
+
+df = as.data.frame(cbind(x,y))
+names(df) <- c("x","z","y")
+regression = T
+```
+
+
+The following snipped demonstrates the simple idea of boosting in a regression example without really considering the friedmann paper.
+```{r}
+set.seed(1234)
+
+library(rpart)
+
+alpha=.05 # learning rate, slows overfitting rate
+n = length(df$x) # subsampling length
+
+YP = 0 # Our starting function f(x) = 0
+
+df$yr=df$y # Initial residuals are the actual values
+
+
+for(t in 1:400){
+  index = sample(1:n,size=n,replace=TRUE)
+  fit=rpart(yr~x,data=df[index,],control = list(maxdepth = 2),method='anova') #fit a regression tree
+  yp=alpha*predict(fit,newdata=df) #shrink by learning rate
+  df$yr=df$yr - yp #subtract residuals
+  YP = YP + yp #add residual model to total model
+}
+
+plot(df$x,df$y)
+lines(df$x,YP)
+```
+
+Comparison by using gbm library
+
+```{r}
+library(gbm)
+
+gbmModel = gbm(y~., data = df,n.trees = 400,shrinkage = 0.05,distribution = "gaussian")
+# distribution specifies the error function here
+# e.g. gaussian = squared error, laplace = absolute 
+
+
+gbmPredictions = predict(gbmModel,newdata = df,n.trees=400,type = "response")
+plot(df$x,df$y)
+lines(df$x,gbmPredictions)
+
+```
+
+
+Classification dataset
+```{r}
+data("iris")
+
+df <- iris[51:150,c("Sepal.Length","Sepal.Width","Species")]
+
+df$Species = ifelse(df$Species=='versicolor',1,-1)
+plot(df[,1:2],col=factor(df[,3]))
+colnames(df) <- c("x1","x2","y")
+regression = F
+```
+
+
+Gradient boosting for both regression and classification in one function. 
+! Important notice: The classification part is kind of a hack, as i am not 100% certain the estimated probabilities correspond to actual probabilities (at least they are distributed from 0-1 and look like probabilities ;)). This also only works for binary classification.
+```{r} 
+
+set.seed(1234)
+
+library(rpart)
+
+# only set to T if using the first dataset, set to F if using the second dataset.
+# listed here again but set at each dataset loading as well...
+# regression = F
+
+
+
+Y = df$y
+data = df
+data$y <- NULL
+data = as.matrix(data)
+
+n_estimators = 400
+learning_rate = 0.05
+min_samples_split=2
+max_depth = 2
+
+# 
+
+# derivative of square loss (simplified)
+squareLossGradient <- function(y,y_pred){
+  return( y-y_pred)
+}
+
+#based on friedmann two-class classification algorithm
+L2response <- function(y,y_pred){
+  return(2*y/(1+exp(2*y*y_pred)))
+}
+
+fitGradientBoost <- function(x,y){
+  #create a list of trees
+  trees = list()
+  
+  #initial guess (mean)
+  y_pred = rep(mean(y),length(y))
+  
+  if(regression){
+    print("GB for regression")
+    for (i in 1:n_estimators){
+      #TODO for some reason i cannot do this without declasring data in the rpart model
+      x = as.data.frame(x)
+      #Calculate gradient (pseudo-residuals)
+      x$gradient = squareLossGradient(y,y_pred)
+      #fit residuals using rpart
+      trees[[i]] = rpart(gradient~.,data=x,control = list(maxdepth=max_depth,minsplit=min_samples_split),method='anova')
+      x$gradient = NULL
+      #create predictions based on original data
+      new_pred = predict(trees[[i]],newdata=x)
+      #add predictions to previous prediction
+      y_pred = y_pred + learning_rate*new_pred
+    }
+  }else{
+    print("GB for classification")
+    # Exact same behavior but using a different loss function
+    for (i in 1:n_estimators){
+      gradient = L2response(y,y_pred)
+      trees[[i]] = rpart(gradient~x,control = list(maxdepth=max_depth,minsplit=min_samples_split),method = 'anova')
+      new_pred = predict(trees[[i]],newdata=as.data.frame(x))
+      y_pred = y_pred + learning_rate*new_pred
+    }
+  }
+  return(trees)
+}
+
+# predict using the list of trees
+predictGradientBoost <- function(trees,x){
+  # initial guess is again mean
+  y_pred = rep(mean(Y),length(Y))
+  print("predicting...")
+  for (i in 1:n_estimators){
+    tmp = predict(trees[[i]],as.data.frame(x))
+    y_pred = y_pred+learning_rate*tmp
+  }
+  # map to probabilities based on loss function
+  if(!regression){ 
+    y_pred = 1/(1+exp(2*y_pred))
+  }
+  return(y_pred)
+}
+
+```
+
+```{r}
+
+#run regression example
+treeList = fitGradientBoost(data,Y)
+predictions = predictGradientBoost(treeList,data)
+
+
+if(regression){
+  plot(df$x,df$y)
+  lines(df$x,predictions)
+}
+```
+
+```{r}
+
+# run classification example
+treeList = fitGradientBoost(data,Y)
+predictions = predictGradientBoost(treeList,data)
+predictions
+
+#library(rpart.plot)
+#rpart.plot(treeList[[5]])
+
+```

@@ -15,7 +15,7 @@ library(rpart) # using the tree implementation of rpart
 data("iris") # Example dataset to demonstrate the use of a random forest
 
 # Define parameters:
-number_of_trees = 100
+number_of_trees = 200
 m_of_M = 2 # Number of columns to consider
 n = dim(iris)[1]
 M = dim(iris)[2]
@@ -33,35 +33,37 @@ for(i in 1:number_of_trees){
   # grow tree to largest extend possible (do not prune) and find best split
   baseLearner = rpart(formula = iris$Species ~., data = iris[rows,cols],method = "class")
   
-  #predict
-  res = predict(baseLearner)
-  trees = c(trees,list(res))
+  trees[[i]] = baseLearner
 }
 
-n_classes = length(levels(iris$Species))
+```
+
+New dataset (in this case using the same as fit)
+```{r}
+newdata = iris
+n_classes = length(levels(newdata$Species))
+n_rows = dim(newdata)[1]
 ```
 
 Classification prediction using Random Forest (Majority Vote)
 ```{r}
+
 result = matrix(ncol=n_classes,nrow=n)
 
-#Classification
-for(i in 1:n){
-  allTreeResult = matrix(data=0,nrow=1,ncol=n_classes)
-  for (j in 1:number_of_trees){
-    curr = trees[[j]][grepl(paste(c("(^|\\b)",i,"(\\.|\\b)"),collapse=""),row.names(trees[[j]])),] 
-    curr = matrix(curr,ncol=n_classes)
-    votes = max.col(curr)
-    for(k in dim(curr)[1]){
-      allTreeResult[,votes[k]] = allTreeResult[,votes[k]] +1
-    }
-    
-  }
+
+#initialize empty result row
+result = matrix(data=0,nrow=n_rows,ncol=n_classes)
+for (j in 1:number_of_trees){
+  curr = predict(trees[[j]],newdata=newdata)
   
-  result[i,]=allTreeResult[1,]
+  # get maximum column and add a 1 as a vote
+  votes = cbind(1:n_rows,max.col(curr,ties.method = 'random'))
+  result[votes] = result[votes]+1
   
 }
 result = as.data.frame(result)
+
+# Get final votes for each observed value
 colnames(result) = levels(iris$Species)
 votedResults = colnames(result)[max.col(result,ties.method="random")]
 print(votedResults)
@@ -71,21 +73,12 @@ print(votedResults)
 
 Regression prediction using Random Forest (Mean over all trees for every Value)
 ```{r}
-
-result = matrix(nrow=n,ncol=n_classes)
-for(i in 1:n){
-  perTreeResult = matrix(data=0,nrow=number_of_trees,ncol=n_classes)
-  for (j in 1:number_of_trees){
-    curr = trees[[j]][grepl(paste(c("(^|\\b)",i,"(\\.|\\b)"),collapse=""),row.names(trees[[j]])),] 
-    curr = matrix(curr,ncol=n_classes)
-    aggregated = colMeans(curr)
-    perTreeResult[j,]=aggregated    
-  }
-  result[i,]=colMeans(perTreeResult,na.rm = T)
+result = matrix(data=0,nrow=n_rows,ncol=n_classes)
+for (j in 1:number_of_trees){
+  curr = predict(trees[[j]],newdata=newdata)
+  result = result+curr
 }
+result = result/number_of_trees
 print(result)
-
-
-
 
 ```

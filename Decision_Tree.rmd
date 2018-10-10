@@ -1,0 +1,213 @@
+---
+title: "Decision Trees"
+output: md_document
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+# uncorrected standard deviation
+std <- function(x){
+  sqrt(mean((x - mean(x))^2))
+}
+
+# Classification error measures (Entropy, Gini, Classification error)
+entropy <- function(x){
+  c = unique(x) # number of classes, any other class not present in the subset would result in 0 fraction anyways
+  res = 0
+  for (i in c){
+    p_i = sum(i == x) / length(x)
+    res = res + p_i*log2(p_i)
+  }
+  -res
+}
+
+# Measures the inequality among values of a frequency distribution
+gini <- function(x){
+  c = unique(x)
+  res = 0
+  for (i in c){
+    p_i = sum(i == x) / length(x)
+    res = res + p_i^2
+  }
+  1 - res
+}
+
+classError <- function(x){
+  c = unique(x)
+  res = c()
+  for (i in c){
+    p_i = sum(i == x) / length(x)
+    res = c(res,p_i)
+  }
+  1 - max(res)
+}
+
+
+
+```
+
+
+```{r}
+#decision tree
+
+decisionTree <- function(x,y,idxs=NA,min_leaf=2,error = "gini"){
+  if(any(is.na(idxs))){
+    idxs <- 1:length(y)
+  }
+  x <- data.matrix(x)
+  y <- data.matrix(y)
+  
+  #n = number of rows of data
+  #c = number of cols
+  #val = prediction for all values in tree (mean of all indices)
+  #score = how effective was the split
+  # error = error measure to be used (when building regression trees, use std)
+  tree <- list(x = x, y=y,idxs=idxs,min_leaf=min_leaf,error = error,lhs = NULL, rhs = NULL,var_idx = NA, split = NA, n = length(idxs),c = dim(x)[2],val = mean(y[idxs]),score = Inf)
+  findSplit(tree)
+}
+
+
+#which variable should we split on and on what level?
+findSplit <- function(tree){
+  #for every column, check if we can find a better split 
+  for (i in 1:tree$c){
+    tree <- findBetterSplit(tree,i)
+  }
+  if(tree$score==Inf){
+    tree
+  }else{
+    x <- tree$x[tree$idxs,tree$var_idx]
+    lhs = which(!(x<=tree$split)==0)
+    rhs = which(!(x>tree$split)==0)
+    tree$lhs = decisionTree(tree$x,tree$y,tree$idxs[lhs],error = tree$error)
+    tree$rhs = decisionTree(tree$x,tree$y,tree$idxs[rhs],error = tree$error)
+    tree  
+  }
+}
+
+
+
+
+findBetterSplit <- function(tree,var_idx){
+  #define values at the node (based on the indices passed down from above)
+  
+  x = tree$x[tree$idxs,var_idx]
+  y = tree$y[tree$idxs]
+  
+  count = tree$n - 1
+  #find best split by going through every row (this is slow because some values may be repeated)
+  if(count>0){
+    for (i in 1:count){
+      lhs = x<=x[i]
+      rhs = x>x[i]
+      if (sum(rhs)==0){
+        next
+      }
+      switch(tree$error,
+             gini ={lhs_err = gini(y[lhs])
+                    rhs_err = gini(y[rhs])},
+             entropy = {lhs_err = entropy(y[lhs])
+                        rhs_err = entropy(y[rhs])},
+             class = {lhs_err = classError(y[lhs])
+                      rhs_err = classError(y[rhs])},
+             regression = {lhs_err = std(y[lhs])
+                           rhs_err = std(y[rhs])}
+             )
+      curr_score = lhs_err*sum(lhs) + rhs_err*sum(rhs)
+
+      if(curr_score<tree$score){
+        tree$var_idx = var_idx
+        tree$split = x[i]
+        tree$score = curr_score
+        
+      }
+    }
+  }
+  
+  tree
+}
+
+```
+
+
+```{r}
+isLeaf <- function(tree){
+ tree$score == Inf
+}
+ 
+predict <- function(tree,x){
+ res = list()
+ for (i in nrow(x)){
+   res = append(res,predict_row(tree,x,i))
+ }
+ res
+}
+
+predict_row <- function(tree,xi,i){
+  if(isLeaf(tree)){
+    tree$val
+  }else{
+    if(xi[i,tree$var_idx]<=tree$split){
+      t = tree$lhs  
+      print("l")
+    }else{
+      t = tree$rhs
+      print("r")
+    }
+    predict_row(t,xi,i)  
+  }
+}
+
+
+```
+
+```{r}
+
+homeowner = c(1,0,0,1,0,0,1,0,0,0)
+marital_status = c("single","married","single","married","divorced","married","divorced","single","married","single")
+annual_income = c(125000,100000,70000,120000,95000,60000,220000,85000,75000,90000)
+defaulted = c(0,0,0,0,1,0,0,1,0,1)
+
+x = data.frame(homeowner,marital_status,annual_income)
+y = defaulted
+cbind(x,y)
+tree = decisionTree(x = x,y = y)
+
+
+
+predict(tree,matrix(c(0,1,100000),nrow = 1))
+
+
+```
+
+```{r}
+
+x = 1:50
+
+y1 = runif(10,max= 15,min=10)
+y2 = runif(10,max=25,min=20)
+y3 = runif(10,max=5,min=0)
+y4 = runif(10,max=35,min=30)
+y5 = runif(10,max=17,min=13)
+y=c(y1,y2,y3,y4,y5)
+y <- scale(y,scale = F)
+
+z1 = runif(10,max=14,min=9)
+z2 = runif(10,max=24,min=19)
+z3 = runif(10,max=6,min=1)
+z4 = runif(10,max=37,min=32)
+z5 = runif(10,max=15,min=11)
+z = c(z1,z2,z3,z4,z5)
+
+x = cbind(x,z)
+
+tree = decisionTree(x = x,y = y,error = "regression")
+predict(tree,matrix(c(4,4),nrow=1))
+```
+}
